@@ -4,7 +4,8 @@ version = "0.1.0"
 authors = ["Nimrod Hajaj <rodhajaj@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/nimr0d/chess_dl"
-
+description = "Chess.com game downloader"
+license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
