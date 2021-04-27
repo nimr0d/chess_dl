@@ -1,0 +1,20 @@
+[package]
+name = "chess_dl"
+version = "0.1.0"
+authors = ["Nimrod Hajaj <rodhajaj@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = {version = "0.11.2", features = ["blocking", "json"]}
+serde = {version = "1.0.125", features = ["derive"]}
+tempfile = "3.2.0"
+pgn-reader = "0.17.0"
+futures = "0.3.13"
+tokio = {version = "1.4.0", features = ["full"]}
+shakmaty = "0.18.0"
+crossbeam-channel = "0.5.1"
+bytes = "1.0.1"
+log = "0.4.14"
+env_logger = "0.8.3"
