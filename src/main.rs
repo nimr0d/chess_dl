@@ -19,7 +19,7 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Clap, Clone)]
-#[clap(version = "0.2.0", name = "chess_dl", author = "Nimrod Hajaj")]
+#[clap(version = "0.3.0", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader.
 struct Options {
     usernames: Vec<String>,
@@ -39,7 +39,7 @@ struct Options {
     #[clap(long)]
     daily: bool,
 
-    /// All time controls. This includes time controls that failed to parse into one of four time control categories.
+    /// All time controls. This includes time controls that failed to parse into one of four time control categories. This does not sort by time controls.
     #[clap(long)]
     all: bool,
 
@@ -130,6 +130,7 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                     Some(Time::RAPID) => opt_cp.rapid || opt_cp.all,
                     Some(Time::DAILY) => opt_cp.daily || opt_cp.all,
                     None => opt_cp.all,
+                    Some(Time::ALL) => unreachable!(),
                 };
                 if time_allowed {
                     let tmp_file = files
@@ -148,7 +149,11 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                 "{}_{}_{}.pgn",
                 game_info.username,
                 game_info.color,
-                game_info.time.unwrap()
+                if opt_cp.all {
+                    Time::ALL
+                } else {
+                    game_info.time.unwrap()
+                }
             );
             output_path.set_file_name(output_str);
             let mut dest_file = OpenOptions::new()

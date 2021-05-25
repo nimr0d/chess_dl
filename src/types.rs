@@ -6,6 +6,7 @@ pub enum Time {
     BLITZ = 2,
     RAPID = 3,
     DAILY = 4,
+    ALL = 5,
 }
 impl Time {
     pub fn parse(val: &str) -> Option<Time> {
