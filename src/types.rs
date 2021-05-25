@@ -35,6 +35,7 @@ pub enum Color {
 }
 #[derive(Hash, PartialEq, Eq)]
 pub struct GameInfo {
+    pub username: String,
     pub color: Color,
     pub time: Option<Time>,
 }
@@ -43,11 +44,13 @@ impl GameInfo {
     pub fn from_game(username: &String, game: &Game) -> GameInfo {
         if *username == game.white {
             GameInfo {
+                username: username.clone(),
                 color: Color::WHITE,
                 time: game.time,
             }
         } else {
             GameInfo {
+                username: username.clone(),
                 color: Color::BLACK,
                 time: game.time,
             }

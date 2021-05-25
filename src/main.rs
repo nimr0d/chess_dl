@@ -19,11 +19,12 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Clap, Clone)]
-#[clap(version = "1.0", name = "chess_dl", author = "Nimrod Hajaj")]
+#[clap(version = "0.2.0", name = "chess_dl", author = "Nimrod Hajaj")]
+/// Chess.com bulk game downloader.
 struct Options {
-    username: String,
-
-    #[clap(parse(from_os_str))]
+    usernames: Vec<String>,
+    /// Output directory.
+    #[clap(short, long, default_value("."), parse(from_os_str))]
     output_dir: PathBuf,
 
     #[clap(long)]
@@ -38,46 +39,77 @@ struct Options {
     #[clap(long)]
     daily: bool,
 
+    /// All time controls. This includes time controls that failed to parse into one of four time control categories.
+    #[clap(long)]
+    all: bool,
+
+    /// Number of download attempts for each archive.
     #[clap(short, long, default_value("5"))]
     attempts: i32,
+
+    /// Number of concurrent downloads. Too many would cause downloads to fail, but higher is usually faster.
+    #[clap(short, long, default_value("10"))]
+    concurrent: usize,
 }
 
-type Archives = Vec<String>;
+struct Archive {
+    username: String,
+    url: String,
+}
+type Archives = Vec<Archive>;
 
-struct PGNMessage(Bytes);
+struct PGNMessage {
+    username: String,
+    bytes: Bytes,
+}
 
 #[derive(Deserialize, Debug)]
 struct JSONArchivesContainer {
-    archives: Archives,
+    archives: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let options = Options::parse();
-    info!(
-        "Downloading games of {} to file(s) {}/{}_*.pgn...",
-        options.username,
-        options.output_dir.as_os_str().to_str().unwrap(),
-        options.username
-    );
+    let mut options = Options::parse();
+    options.usernames = options
+        .usernames
+        .into_iter()
+        .map(|u| u.to_lowercase())
+        .collect::<Vec<String>>();
     download_all_games(&options).await?;
     Ok(())
 }
 
 async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
     let client = Client::new();
-    let archives_url = format!(
-        "https://api.chess.com/pub/player/{}/games/archives",
-        opt.username
-    );
-    let archives = client
-        .get(archives_url)
-        .send()
-        .await?
-        .json::<JSONArchivesContainer>()
-        .await?
-        .archives;
+    let mut archives = Archives::new();
+
+    for username in &opt.usernames {
+        let archives_url = format!(
+            "https://api.chess.com/pub/player/{}/games/archives",
+            username
+        );
+        archives.append(
+            &mut (client
+                .get(archives_url)
+                .send()
+                .await?
+                .json::<JSONArchivesContainer>()
+                .await?
+                .archives
+                .into_iter()
+                .map(|mut url| {
+                    url.push_str("/pgn");
+                    Archive {
+                        username: username.clone(),
+                        url: url,
+                    }
+                })
+                .collect::<Archives>()),
+        );
+    }
+
     let num_archives = archives.len();
     info!("Found {} archives to download", num_archives);
 
@@ -86,36 +118,35 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
     let (send, rec) = unbounded::<PGNMessage>();
     let opt_cp = opt.clone();
     let write_worker = std::thread::spawn(move || {
-        let mut files = HashMap::<GameInfo, (File, String)>::new();
+        let mut files = HashMap::<GameInfo, File>::new();
         for _ in 0..num_archives {
-            let pgn = rec.recv_timeout(Duration::from_secs(120)).unwrap().0;
-            let s = std::str::from_utf8(&*pgn).unwrap();
+            let pgn_message = rec.recv_timeout(Duration::from_secs(120)).unwrap();
+            let s = std::str::from_utf8(&*pgn_message.bytes).unwrap();
             for game in ChessParser::parse(s) {
-                let game_info = GameInfo::from_game(&opt_cp.username, &game);
+                let game_info = GameInfo::from_game(&pgn_message.username, &game);
                 let time_allowed = match game_info.time {
-                    Some(Time::BULLET) => opt_cp.bullet,
-                    Some(Time::BLITZ) => opt_cp.blitz,
-                    Some(Time::RAPID) => opt_cp.rapid,
-                    Some(Time::DAILY) => opt_cp.daily,
-                    None => false,
+                    Some(Time::BULLET) => opt_cp.bullet || opt_cp.all,
+                    Some(Time::BLITZ) => opt_cp.blitz || opt_cp.all,
+                    Some(Time::RAPID) => opt_cp.rapid || opt_cp.all,
+                    Some(Time::DAILY) => opt_cp.daily || opt_cp.all,
+                    None => opt_cp.all,
                 };
                 if time_allowed {
-                    let mut tmp_file = &files
+                    let tmp_file = files
                         .entry(game_info)
-                        .or_insert_with(|| (tempfile::tempfile().unwrap(), opt_cp.username.clone()))
-                        .0;
+                        .or_insert_with(|| tempfile::tempfile().unwrap());
                     tmp_file.write_all(game.pgn.as_bytes()).unwrap();
                 }
             }
         }
 
         for (game_info, val) in files.iter_mut() {
-            let mut tmp_file = &val.0;
+            let mut tmp_file = val;
             tmp_file.seek(SeekFrom::Start(0)).expect("Seek failed");
 
             let output_str = format!(
                 "{}_{}_{}.pgn",
-                val.1,
+                game_info.username,
                 game_info.color,
                 game_info.time.unwrap()
             );
@@ -135,43 +166,50 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
         }
         drop(rec);
     });
-    let fetches = futures::stream::iter(archives.into_iter().map(|mut pgn_url| {
+    let fetches = futures::stream::iter(archives.into_iter().map(|archive| {
         let client = &client;
         let send = send.clone();
         async move {
-            pgn_url.push_str("/pgn");
             for attempt in 1..opt.attempts + 1 {
-                match client.get(&pgn_url).send().await {
+                match client.get(&archive.url).send().await {
                     Ok(resp) => match resp.bytes().await {
                         Ok(bytes) => {
                             if bytes.is_empty() {
                                 if attempt == opt.attempts {
                                     error!(
                                         "Failed to download {} {}/{} times",
-                                        pgn_url, attempt, opt.attempts
+                                        archive.url, attempt, opt.attempts
                                     );
-                                    send.send(PGNMessage(Bytes::from(""))).expect("Send failed");
+                                    send.send(PGNMessage {
+                                        username: archive.username.clone(),
+                                        bytes: Bytes::from(""),
+                                    })
+                                    .expect("Send failed");
                                 } else {
                                     error!(
                                         "Failed to download {} {}/{} times. Retrying...",
-                                        pgn_url, attempt, opt.attempts
+                                        archive.url, attempt, opt.attempts
                                     );
                                 }
                             } else {
-                                info!("Downloaded {} bytes from {}", bytes.len(), pgn_url);
-                                send.send(PGNMessage(bytes)).expect("Send failed");
+                                info!("Downloaded {} bytes from {}", bytes.len(), archive.url);
+                                send.send(PGNMessage {
+                                    username: archive.username,
+                                    bytes: bytes,
+                                })
+                                .expect("Send failed");
                                 break;
                             }
                         }
-                        Err(_) => error!("Failed to download  {}", pgn_url),
+                        Err(_) => error!("Failed to download  {}", archive.url),
                     },
-                    Err(_) => error!("Failed to {}", pgn_url),
+                    Err(_) => error!("Failed to {}", archive.url),
                 }
                 info!("Retrying...");
             }
         }
     }))
-    .buffer_unordered(10)
+    .buffer_unordered(opt.concurrent)
     .collect::<Vec<()>>();
     fetches.await;
     write_worker.join().expect("Join failed");

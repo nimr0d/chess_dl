@@ -36,8 +36,8 @@ impl<'a> std::iter::Iterator for ChessParser<'a> {
                     let attr = header_line_in.next().unwrap().as_str();
                     let val = header_line_in.next().unwrap().as_str();
                     match attr {
-                        "White" => g.white = val.to_owned(),
-                        "Black" => g.black = val.to_owned(),
+                        "White" => g.white = val.to_lowercase(),
+                        "Black" => g.black = val.to_lowercase(),
                         "TimeControl" => g.time = Time::parse(val),
                         _ => (),
                     }
