@@ -1,0 +1,10 @@
+not_delimiter = _{ !("[" | "]" | "\"" | "\n") ~ ANY }
+not_delimiter_or_space = _{ !("[" | "]" | "\"" | "\n" | " ") ~ ANY }
+not_newline = _{!("\n" | "\"") ~ ANY }
+attr = { not_delimiter_or_space* }
+val = { not_delimiter* }
+text = _{ not_newline+ ~ "\n"+}
+
+header_line = {"[" ~ attr ~ " \"" ~ val ~ "\"]" ~ "\n"+}
+game = { header_line* ~ text}
+games = { SOI ~ game* ~ EOI}
