@@ -6,6 +6,7 @@ edition = "2018"
 repository = "https://github.com/nimr0d/chess_dl"
 description = "Chess.com game downloader"
 license = "MIT"
+readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
