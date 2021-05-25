@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use clap::Clap;
+use clap::{ArgGroup, Clap};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{error, info};
@@ -19,28 +19,28 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Clap, Clone)]
-#[clap(version = "0.3.0", name = "chess_dl", author = "Nimrod Hajaj")]
+#[clap(group = ArgGroup::new("time").required(true), version = "0.3.0", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader.
 struct Options {
     usernames: Vec<String>,
     /// Output directory.
-    #[clap(short, long, default_value("."), parse(from_os_str))]
+    #[clap(short, default_value("."), parse(from_os_str))]
     output_dir: PathBuf,
 
-    #[clap(long)]
+    #[clap(long, group = "time")]
     blitz: bool,
 
-    #[clap(long)]
+    #[clap(long, group = "time")]
     bullet: bool,
 
-    #[clap(long)]
+    #[clap(long, group = "time")]
     rapid: bool,
 
-    #[clap(long)]
+    #[clap(long, group = "time")]
     daily: bool,
 
     /// All time controls. This includes time controls that failed to parse into one of four time control categories. This does not sort by time controls.
-    #[clap(long)]
+    #[clap(long, group = "time")]
     all: bool,
 
     /// Number of download attempts for each archive.
@@ -148,12 +148,12 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
             let output_str = format!(
                 "{}_{}_{}.pgn",
                 game_info.username,
-                game_info.color,
                 if opt_cp.all {
                     Time::ALL
                 } else {
                     game_info.time.unwrap()
                 }
+                game_info.color,
             );
             output_path.set_file_name(output_str);
             let mut dest_file = OpenOptions::new()
