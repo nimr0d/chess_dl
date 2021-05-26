@@ -19,9 +19,10 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Clap, Clone)]
-#[clap(group = ArgGroup::new("time").required(true), version = "0.3.0", name = "chess_dl", author = "Nimrod Hajaj")]
+#[clap(group = ArgGroup::new("time").required(true), version = "0.3.1", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader.
 struct Options {
+    #[clap(required = true)]
     usernames: Vec<String>,
     /// Output directory.
     #[clap(short, default_value("."), parse(from_os_str))]
@@ -35,7 +36,7 @@ struct Options {
 
     #[clap(long, group = "time")]
     rapid: bool,
-
+    /// Currently unsupported and not distinguished from rapid
     #[clap(long, group = "time")]
     daily: bool,
 
