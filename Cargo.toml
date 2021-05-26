@@ -1,6 +1,6 @@
 [package]
 name = "chess_dl"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Nimrod Hajaj <rodhajaj@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/nimr0d/chess_dl"
