@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use clap::{ArgGroup, Clap};
+use clap::Clap;
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{error, info};
@@ -13,14 +13,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod types;
-use types::{GameInfo, Time};
+use types::{PGNMetadata, Time};
 
 mod parse;
 use parse::ChessParser;
 
 #[derive(Clap, Clone)]
-#[clap(group = ArgGroup::new("time").required(true), version = "0.3.1", name = "chess_dl", author = "Nimrod Hajaj")]
-/// Chess.com bulk game downloader.
+#[clap(version = "0.3.3", name = "chess_dl", author = "Nimrod Hajaj")]
+/// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
 struct Options {
     #[clap(required = true)]
     usernames: Vec<String>,
@@ -28,24 +28,28 @@ struct Options {
     #[clap(short, default_value("."), parse(from_os_str))]
     output_dir: PathBuf,
 
-    #[clap(long, group = "time")]
+    #[clap(long, display_order = 3)]
     blitz: bool,
 
-    #[clap(long, group = "time")]
+    #[clap(long, display_order = 2)]
     bullet: bool,
 
-    #[clap(long, group = "time")]
+    #[clap(long, display_order = 4)]
     rapid: bool,
-    /// Currently unsupported and not distinguished from rapid
-    #[clap(long, group = "time")]
+    /// Currently unsupported and not detected by the parser.
+    #[clap(long, display_order = 5)]
     daily: bool,
 
-    /// All time controls. This includes time controls that failed to parse into one of four time control categories. This does not sort by time controls.
-    #[clap(long, group = "time", conflicts_with_all(&["blitz", "bullet", "rapid", "daily"]))]
-    all: bool,
+    /// Sort files by time control.
+    #[clap(short, long, group = "time")]
+    timesort: bool,
+
+    /// Downloads raw files and does no parsing. This conflicts with any flag that depends on parsing.
+    #[clap(long, conflicts_with_all(&["all", "blitz", "bullet", "rapid", "daily", "timesort"]))]
+    raw: bool,
 
     /// Number of download attempts for each archive.
-    #[clap(short, long, default_value("5"))]
+    #[clap(short, long, default_value("8"))]
     attempts: i32,
 
     /// Number of concurrent downloads. Too many would cause downloads to fail, but higher is usually faster.
@@ -119,25 +123,37 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
     let (send, rec) = unbounded::<PGNMessage>();
     let opt_cp = opt.clone();
     let write_worker = std::thread::spawn(move || {
-        let mut files = HashMap::<GameInfo, File>::new();
+        let mut files = HashMap::<PGNMetadata, File>::new();
         for _ in 0..num_archives {
             let pgn_message = rec.recv_timeout(Duration::from_secs(120)).unwrap();
-            let s = std::str::from_utf8(&*pgn_message.bytes).unwrap();
-            for game in ChessParser::parse(s) {
-                let game_info = GameInfo::from_game(&pgn_message.username, &game);
-                let time_allowed = match game_info.time {
-                    Some(Time::BULLET) => opt_cp.bullet || opt_cp.all,
-                    Some(Time::BLITZ) => opt_cp.blitz || opt_cp.all,
-                    Some(Time::RAPID) => opt_cp.rapid || opt_cp.all,
-                    Some(Time::DAILY) => opt_cp.daily || opt_cp.all,
-                    None => opt_cp.all,
-                    Some(Time::ALL) => unreachable!(),
-                };
-                if time_allowed {
-                    let tmp_file = files
-                        .entry(game_info)
-                        .or_insert_with(|| tempfile::tempfile().unwrap());
-                    tmp_file.write_all(game.pgn.as_bytes()).unwrap();
+            let game_info = PGNMetadata::from_username(&pgn_message.username);
+            if opt_cp.raw {
+                files
+                    .entry(game_info)
+                    .or_insert_with(|| tempfile::tempfile().unwrap())
+                    .write_all(&*pgn_message.bytes)
+                    .unwrap();
+            } else {
+                let s = std::str::from_utf8(&*pgn_message.bytes).unwrap();
+                for game in ChessParser::parse(s) {
+                    let all = !(opt_cp.bullet | opt_cp.blitz | opt_cp.rapid | opt_cp.daily);
+                    let time_allowed = match game.time {
+                        Time::MISC => all,
+                        Time::BULLET => opt_cp.bullet || all,
+                        Time::BLITZ => opt_cp.blitz || all,
+                        Time::RAPID => opt_cp.rapid || all,
+                        Time::DAILY => opt_cp.daily || all,
+                        Time::NONE => unreachable!(),
+                    };
+                    if time_allowed {
+                        let game_info =
+                            PGNMetadata::from_game(&pgn_message.username, &game, !opt_cp.timesort);
+                        files
+                            .entry(game_info)
+                            .or_insert_with(|| tempfile::tempfile().unwrap())
+                            .write_all(game.pgn.as_bytes())
+                            .unwrap();
+                    }
                 }
             }
         }
@@ -146,16 +162,7 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
             let mut tmp_file = val;
             tmp_file.seek(SeekFrom::Start(0)).expect("Seek failed");
 
-            let output_str = format!(
-                "{}_{}_{}.pgn",
-                game_info.username,
-                if opt_cp.all {
-                    Time::ALL
-                } else {
-                    game_info.time.unwrap()
-                },
-                game_info.color,
-            );
+            let output_str = format!("{}", game_info);
             output_path.set_file_name(output_str);
             let mut dest_file = OpenOptions::new()
                 .write(true)

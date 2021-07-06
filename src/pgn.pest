@@ -1,8 +1,8 @@
-not_delimiter = _{ !("[" | "]" | "\"" | "\n") ~ ANY }
-not_delimiter_or_space = _{ !("[" | "]" | "\"" | "\n" | " ") ~ ANY }
-not_newline = _{!("\n" | "\"") ~ ANY }
-attr = { not_delimiter_or_space* }
-val = { not_delimiter* }
+not_newline = _{!("\n") ~ ANY }
+attr_chars = _{ !("]" | "\n" | " \"") ~ ANY }
+attr = { attr_chars* }
+val_chars = _{ !("\"]") ~ ANY }
+val = { val_chars* }
 text = _{ not_newline+ ~ "\n"+}
 header_line = {"[" ~ attr ~ " \"" ~ val ~ "\"]" ~ "\n"+}
 game = { header_line* ~ text}
