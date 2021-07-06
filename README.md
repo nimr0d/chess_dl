@@ -9,5 +9,5 @@ cargo install chess_dl
 ## Example
 
 ```
-chess_dl hikaru gmwso lyonbeast --blitz --bullet
+chess_dl hikaru gmwso lyonbeast --blitz --bullet -t
 ```
