@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use clap::Clap;
+use clap::Parser;
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{error, info};
@@ -18,7 +18,7 @@ use types::{PGNMetadata, Time};
 mod parse;
 use parse::ChessParser;
 
-#[derive(Clap, Clone)]
+#[derive(Parser, Clone)]
 #[clap(version = "0.3.3", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
 struct Options {
@@ -50,7 +50,7 @@ struct Options {
 
     /// Number of download attempts for each archive.
     #[clap(short, long, default_value("8"))]
-    attempts: i32,
+    attempts: u32,
 
     /// Number of concurrent downloads. Too many would cause downloads to fail, but higher is usually faster.
     #[clap(short, long, default_value("10"))]
@@ -82,8 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .into_iter()
         .map(|u| u.to_lowercase())
         .collect::<Vec<String>>();
-    download_all_games(&options).await?;
-    Ok(())
+    download_all_games(&options).await
 }
 
 async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {

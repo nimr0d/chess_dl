@@ -6,4 +6,4 @@ val = { val_chars* }
 text = _{ not_newline+ ~ "\n"+}
 header_line = {"[" ~ attr ~ " \"" ~ val ~ "\"]" ~ "\n"+}
 game = { header_line* ~ text}
-games = { SOI ~ game* ~ EOI}
+games = { SOI ~ game* ~ EOI }
