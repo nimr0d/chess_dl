@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use clap::Parser;
+use clap::{value_parser, Parser};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{error, info};
@@ -19,41 +19,41 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Parser, Clone)]
-#[clap(version = "0.3.3", name = "chess_dl", author = "Nimrod Hajaj")]
+#[command(version = "0.3.6", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
 struct Options {
-    #[clap(required = true)]
+    #[arg(required = true)]
     usernames: Vec<String>,
     /// Output directory.
-    #[clap(short, default_value("."), parse(from_os_str))]
+    #[arg(short, default_value("."), value_parser(value_parser!(PathBuf)))]
     output_dir: PathBuf,
 
-    #[clap(long, display_order = 3)]
+    #[arg(long, display_order = 3)]
     blitz: bool,
 
-    #[clap(long, display_order = 2)]
+    #[arg(long, display_order = 2)]
     bullet: bool,
 
-    #[clap(long, display_order = 4)]
+    #[arg(long, display_order = 4)]
     rapid: bool,
     /// Currently unsupported and not detected by the parser.
-    #[clap(long, display_order = 5)]
+    #[arg(long, display_order = 5)]
     daily: bool,
 
     /// Sort files by time control.
-    #[clap(short, long, group = "time")]
+    #[arg(short, long, group = "time")]
     timesort: bool,
 
     /// Downloads raw files and does no parsing. This conflicts with any flag that depends on parsing.
-    #[clap(long, conflicts_with_all(&["all", "blitz", "bullet", "rapid", "daily", "timesort"]))]
+    #[arg(long, conflicts_with_all(&["all", "blitz", "bullet", "rapid", "daily", "timesort"]))]
     raw: bool,
 
     /// Number of download attempts for each archive.
-    #[clap(short, long, default_value("8"))]
+    #[arg(short, long, default_value("8"))]
     attempts: u32,
 
     /// Number of concurrent downloads. Too many would cause downloads to fail, but higher is usually faster.
-    #[clap(short, long, default_value("10"))]
+    #[arg(short, long, default_value("10"))]
     concurrent: usize,
 }
 
