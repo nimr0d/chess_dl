@@ -2,37 +2,38 @@ use strum::Display;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Display)]
 pub enum Time {
-    NONE,
-    MISC,
-    BULLET,
-    BLITZ,
-    RAPID,
-    DAILY,
+    None,
+    Misc,
+    Bullet,
+    Blitz,
+    Rapid,
+    #[allow(dead_code)]
+    Daily,
 }
 impl Time {
     pub fn parse(val: &str) -> Time {
         let seconds = match val.split('+').next() {
             Some(s) => match s.parse::<i32>() {
                 Ok(s) => s,
-                Err(_) => return Time::MISC,
+                Err(_) => return Time::Misc,
             },
-            None => return Time::MISC,
+            None => return Time::Misc,
         };
 
         if seconds <= 120 {
-            Self::BULLET
+            Self::Bullet
         } else if seconds <= 600 {
-            Self::BLITZ
+            Self::Blitz
         } else if seconds <= 1500 {
-            Self::RAPID
+            Self::Rapid
         } else {
-            Self::MISC
+            Self::Misc
         }
     }
 }
 impl Default for Time {
     fn default() -> Self {
-        Time::NONE
+        Time::None
     }
 }
 
@@ -46,9 +47,9 @@ pub struct Game {
 
 #[derive(Hash, PartialEq, Eq, Display)]
 pub enum Color {
-    NONE,
-    WHITE,
-    BLACK,
+    None,
+    White,
+    Black,
 }
 #[derive(Hash, PartialEq, Eq)]
 pub struct PGNMetadata {
@@ -62,18 +63,18 @@ impl PGNMetadata {
         PGNMetadata {
             username: username.clone(),
             color: if *username == game.white {
-                Color::WHITE
+                Color::White
             } else {
-                Color::BLACK
+                Color::Black
             },
-            time: if ignore_time { Time::NONE } else { game.time },
+            time: if ignore_time { Time::None } else { game.time },
         }
     }
-    pub fn from_username(username: &String) -> PGNMetadata {
+    pub fn from_username(username: &str) -> PGNMetadata {
         PGNMetadata {
-            username: username.clone(),
-            color: Color::NONE,
-            time: Time::NONE,
+            username: String::from(username),
+            color: Color::None,
+            time: Time::None,
         }
     }
 }
@@ -81,10 +82,10 @@ impl PGNMetadata {
 impl std::fmt::Display for PGNMetadata {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut r = write!(f, "{}", self.username);
-        if self.color != Color::NONE {
+        if self.color != Color::None {
             r = r.and(write!(f, "_{}", self.color))
         }
-        if self.time != Time::NONE {
+        if self.time != Time::None {
             r = r.and(write!(f, "_{}", self.time))
         }
         r.and(write!(f, ".pgn"))

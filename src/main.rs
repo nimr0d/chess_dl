@@ -107,7 +107,7 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                     url.push_str("/pgn");
                     Archive {
                         username: username.clone(),
-                        url: url,
+                        url,
                     }
                 })
                 .collect::<Archives>()),
@@ -130,19 +130,19 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                 files
                     .entry(game_info)
                     .or_insert_with(|| tempfile::tempfile().unwrap())
-                    .write_all(&*pgn_message.bytes)
+                    .write_all(&pgn_message.bytes)
                     .unwrap();
             } else {
-                let s = std::str::from_utf8(&*pgn_message.bytes).unwrap();
+                let s = std::str::from_utf8(&pgn_message.bytes).unwrap();
                 for game in ChessParser::parse(s) {
                     let all = !(opt_cp.bullet | opt_cp.blitz | opt_cp.rapid | opt_cp.daily);
                     let time_allowed = match game.time {
-                        Time::MISC => all,
-                        Time::BULLET => opt_cp.bullet || all,
-                        Time::BLITZ => opt_cp.blitz || all,
-                        Time::RAPID => opt_cp.rapid || all,
-                        Time::DAILY => opt_cp.daily || all,
-                        Time::NONE => unreachable!(),
+                        Time::Misc => all,
+                        Time::Bullet => opt_cp.bullet || all,
+                        Time::Blitz => opt_cp.blitz || all,
+                        Time::Rapid => opt_cp.rapid || all,
+                        Time::Daily => opt_cp.daily || all,
+                        Time::None => unreachable!(),
                     };
                     if time_allowed {
                         let game_info =
@@ -207,7 +207,7 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                                 info!("Downloaded {} bytes from {}", bytes.len(), archive.url);
                                 send.send(PGNMessage {
                                     username: archive.username,
-                                    bytes: bytes,
+                                    bytes,
                                 })
                                 .expect("Send failed");
                                 break;
