@@ -28,8 +28,10 @@ impl<'a> std::iter::Iterator for ChessParser<'a> {
         let game = self.pgn.next()?;
         match game.as_rule() {
             Rule::game => {
-                let mut g = Game::default();
-                g.pgn = game.as_str().to_owned();
+                let mut g = Game {
+                    pgn: game.as_str().to_owned(),
+                    ..Default::default()
+                };
                 for header_line in game.into_inner() {
                     let mut header_line_in = header_line.into_inner();
                     // header_line
