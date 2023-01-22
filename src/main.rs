@@ -19,7 +19,7 @@ mod parse;
 use parse::ChessParser;
 
 #[derive(Parser, Clone)]
-#[command(version = "0.3.7", name = "chess_dl", author = "Nimrod Hajaj")]
+#[command(version = "0.3.8", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
 struct Options {
     #[arg(required = true)]
