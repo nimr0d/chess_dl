@@ -1,3 +1,5 @@
+NOTE: Not working until I get a chess.com API token.
+
 # chess_dl
 Fast Chess.com bulk game downloader. Parses the games in order to sort into colors and time controls.
 
