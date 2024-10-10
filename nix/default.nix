@@ -5,7 +5,7 @@
   manifest = (lib.importTOML ../Cargo.toml).package;
 in
   rustPlatform.buildRustPackage {
-    pname = "chess-dl";
+    pname = "chess_dl";
     inherit (manifest) version;
 
     src = lib.sourceByRegex ../. [
