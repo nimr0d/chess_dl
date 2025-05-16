@@ -1,10 +1,10 @@
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use bytes::Bytes;
 use clap::{Parser, value_parser};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{debug, error, info};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
@@ -31,31 +31,42 @@ struct Options {
     output_dir: PathBuf,
 
     #[arg(long, display_order = 3)]
+    /// Include Blitz games.
     blitz: bool,
 
+    /// Include Bullet games.
     #[arg(long, display_order = 2)]
     bullet: bool,
 
+    /// Include Rapid games.
     #[arg(long, display_order = 4)]
     rapid: bool,
     /// Currently unsupported and not detected by the parser.
     #[arg(long, display_order = 5)]
     daily: bool,
 
-    /// Sort files by time control.
-    #[arg(short, long, group = "time")]
-    timesort: bool,
+    /// Group games regardless of player color.
+    #[arg(short = 'c', long, display_order = 6)]
+    group_color: bool,
 
-    /// Downloads raw files and does no parsing. This conflicts with any flag that depends on parsing.
-    #[arg(long, conflicts_with_all(&["blitz", "bullet", "rapid", "daily", "timesort"]))]
+    /// Group games regardless of username.
+    #[arg(short = 'u', long, display_order = 7)]
+    group_users: bool,
+
+    /// Separate games by time control.
+    #[arg(short = 't', long, group = "time")]
+    separate_time: bool,
+
+    /// Download raw PGN files without parsing or sorting.
+    #[arg(long, conflicts_with_all(&["blitz", "bullet", "rapid", "daily", "separate_time"]))]
     raw: bool,
 
-    /// Number of download attempts for each archive.
+    /// Maximum number of download attempts per archive.
     #[arg(short, long, default_value("8"))]
     attempts: u32,
 
-    /// Number of concurrent downloads. Too many would cause downloads to fail, but higher is usually faster.
-    #[arg(short, long, default_value("10"))]
+    /// Maximum number of concurrent archive downloads.
+    #[arg(short = 'C', long, default_value("10"))]
     concurrent: usize,
 }
 
@@ -222,9 +233,9 @@ fn process_pgn_messages(
                     error!("Received empty PGN message for user {}", msg.username);
                     continue;
                 }
-                if opt.raw {
+                if opt.raw || (opt.group_color && !opt.separate_time) {
                     files
-                        .entry(PGNMetadata::from_username(&msg.username))
+                        .entry(PGNMetadata::from_username(&msg.username, opt.group_users))
                         .or_insert_with(|| tempfile::tempfile().unwrap())
                         .write_all(&msg.bytes)?;
                 } else {
@@ -251,7 +262,9 @@ fn process_pgn_messages(
                                             let game_info = PGNMetadata::from_game(
                                                 &msg.username,
                                                 &game,
-                                                !opt.timesort,
+                                                !opt.separate_time,
+                                                opt.group_users,
+                                                opt.group_color,
                                             );
                                             files
                                                 .entry(game_info)

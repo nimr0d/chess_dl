@@ -49,28 +49,46 @@ pub enum Color {
 }
 #[derive(Hash, PartialEq, Eq)]
 pub struct PGNMetadata {
-    pub username: String,
+    pub username: Option<String>,
     pub color: Color,
     pub time: Time,
 }
 
 impl PGNMetadata {
-    pub fn from_game(username: &str, game: &Game, ignore_time: bool) -> PGNMetadata {
+    pub fn from_game(
+        username: &str,
+        game: &Game,
+        group_time: bool,
+        group_users: bool,
+        group_color: bool,
+    ) -> PGNMetadata {
         PGNMetadata {
-            username: username.to_owned(),
-            color: if username.eq_ignore_ascii_case(&game.white) {
-                Color::White
-            } else if username.eq_ignore_ascii_case(&game.black) {
-                Color::Black
+            username: if group_users {
+                None
             } else {
-                Color::None
+                Some(username.to_owned())
             },
-            time: if ignore_time { Time::None } else { game.time },
+            color: if group_color {
+                Color::None
+            } else {
+                if username.eq_ignore_ascii_case(&game.white) {
+                    Color::White
+                } else if username.eq_ignore_ascii_case(&game.black) {
+                    Color::Black
+                } else {
+                    Color::None
+                }
+            },
+            time: if group_time { Time::None } else { game.time },
         }
     }
-    pub fn from_username(username: &str) -> PGNMetadata {
+    pub fn from_username(username: &str, group_users: bool) -> PGNMetadata {
         PGNMetadata {
-            username: String::from(username),
+            username: if group_users {
+                None
+            } else {
+                Some(username.to_owned())
+            },
             color: Color::None,
             time: Time::None,
         }
@@ -79,7 +97,11 @@ impl PGNMetadata {
 
 impl std::fmt::Display for PGNMetadata {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut r = write!(f, "{}", self.username);
+        let mut r = if let Some(u) = &self.username {
+            write!(f, "{}", u)
+        } else {
+            Ok(())
+        };
         if self.color != Color::None {
             r = r.and(write!(f, "_{}", self.color))
         }
