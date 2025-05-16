@@ -1,8 +1,8 @@
 use bytes::Bytes;
-use clap::{value_parser, Parser};
+use clap::{Parser, value_parser};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
-use log::{error, info};
+use log::{debug, error, info};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -18,9 +18,10 @@ use types::{PGNMetadata, Time};
 mod parse;
 use parse::ChessParser;
 
-#[derive(Parser, Clone)]
-#[command(version = "0.3.9", name = "chess_dl", author = "Nimrod Hajaj")]
 /// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
+#[derive(Parser, Clone)]
+#[command(version = "0.4.0", name = "chess_dl", author = "Nimrod Hajaj")]
+
 struct Options {
     #[arg(required = true)]
     usernames: Vec<String>,
@@ -45,7 +46,7 @@ struct Options {
     timesort: bool,
 
     /// Downloads raw files and does no parsing. This conflicts with any flag that depends on parsing.
-    #[arg(long, conflicts_with_all(&["all", "blitz", "bullet", "rapid", "daily", "timesort"]))]
+    #[arg(long, conflicts_with_all(&["blitz", "bullet", "rapid", "daily", "timesort"]))]
     raw: bool,
 
     /// Number of download attempts for each archive.
@@ -94,6 +95,7 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
             "https://api.chess.com/pub/player/{}/games/archives",
             username
         );
+        debug!("Archives URL: {}", archives_url);
         archives.append(
             &mut (client
                 .get(archives_url)
@@ -117,67 +119,12 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
     let num_archives = archives.len();
     info!("Found {} archives to download", num_archives);
 
-    let mut output_path = opt.output_dir.clone();
+    let output_path = opt.output_dir.clone();
 
     let (send, rec) = unbounded::<PGNMessage>();
     let opt_cp = opt.clone();
-    let write_worker = std::thread::spawn(move || {
-        let mut files = HashMap::<PGNMetadata, File>::new();
-        for _ in 0..num_archives {
-            let pgn_message = rec.recv_timeout(Duration::from_secs(120)).unwrap();
-            let game_info = PGNMetadata::from_username(&pgn_message.username);
-            if opt_cp.raw {
-                files
-                    .entry(game_info)
-                    .or_insert_with(|| tempfile::tempfile().unwrap())
-                    .write_all(&pgn_message.bytes)
-                    .unwrap();
-            } else {
-                let s = std::str::from_utf8(&pgn_message.bytes).unwrap();
-                for game in ChessParser::parse(s) {
-                    let all = !(opt_cp.bullet | opt_cp.blitz | opt_cp.rapid | opt_cp.daily);
-                    let time_allowed = match game.time {
-                        Time::Misc => all,
-                        Time::Bullet => opt_cp.bullet || all,
-                        Time::Blitz => opt_cp.blitz || all,
-                        Time::Rapid => opt_cp.rapid || all,
-                        Time::Daily => opt_cp.daily || all,
-                        Time::None => unreachable!(),
-                    };
-                    if time_allowed {
-                        let game_info =
-                            PGNMetadata::from_game(&pgn_message.username, &game, !opt_cp.timesort);
-                        files
-                            .entry(game_info)
-                            .or_insert_with(|| tempfile::tempfile().unwrap())
-                            .write_all(game.pgn.as_bytes())
-                            .unwrap();
-                    }
-                }
-            }
-        }
-
-        for (game_info, val) in files.iter_mut() {
-            let mut tmp_file = val;
-            tmp_file.seek(SeekFrom::Start(0)).expect("Seek failed");
-
-            let output_str = format!("{}", game_info);
-            output_path.set_file_name(output_str);
-            let mut dest_file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&output_path)
-                .expect("Failed to create destination file");
-            info!(
-                "Copying temporary file to {}...",
-                output_path.as_os_str().to_str().unwrap()
-            );
-            let num_bytes = std::io::copy(&mut tmp_file, &mut dest_file)
-                .expect("Failed to copy to destination file");
-            info!("Number of bytes copied: {}", num_bytes);
-        }
-        drop(rec);
-    });
+    let write_worker =
+        std::thread::spawn(move || process_pgn_messages(rec, opt_cp, output_path, num_archives));
     let fetches = futures::stream::iter(archives.into_iter().map(|archive| {
         let client = &client;
         let send = send.clone();
@@ -224,6 +171,137 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
     .buffer_unordered(opt.concurrent)
     .collect::<Vec<()>>();
     fetches.await;
-    write_worker.join().expect("Join failed");
+
+    // Join the writer thread and handle its nested Result
+    let worker_join_result = write_worker.join();
+
+    // Handle the nested Result: first for thread panic, then for worker function error
+    let final_result: Result<(), Box<dyn Error>> = match worker_join_result {
+        Ok(worker_inner_result) => {
+            // Thread did not panic, now handle the Result from the worker function
+            worker_inner_result.map_err(|e| e as Box<dyn Error>)
+        }
+        Err(panic_info) => {
+            // Thread panicked, convert panic info to a Box<dyn Error>
+            let err_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                format!("Worker thread panicked: {}", s)
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                format!("Worker thread panicked: {}", s)
+            } else {
+                "Worker thread panicked".to_string()
+            };
+            Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err_msg)))
+        }
+    };
+
+    // Propagate any error from either the worker function or the panic
+    final_result?;
+
+    Ok(())
+}
+
+fn process_pgn_messages(
+    rec: crossbeam_channel::Receiver<PGNMessage>,
+    opt: Options,             // Takes ownership of Options
+    mut output_path: PathBuf, // Takes ownership of output_path
+    num_archives: usize,      // Need this to know when to stop
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut files = HashMap::<PGNMetadata, File>::new();
+    for i in 0..num_archives {
+        let pgn_message = rec.recv_timeout(Duration::from_secs(120));
+        match pgn_message {
+            Ok(msg) => {
+                if msg.bytes.is_empty() {
+                    error!("Received empty PGN message for user {}", msg.username);
+                    continue;
+                }
+                if opt.raw {
+                    files
+                        .entry(PGNMetadata::from_username(&msg.username))
+                        .or_insert_with(|| tempfile::tempfile().unwrap())
+                        .write_all(&msg.bytes)?;
+                } else {
+                    match ChessParser::parse(std::str::from_utf8(&msg.bytes)?) {
+                        Ok(parser) => {
+                            for game_result in parser {
+                                match game_result {
+                                    Ok(game) => {
+                                        let all = !(opt.bullet | opt.blitz | opt.rapid | opt.daily);
+                                        let time_allowed = match game.time {
+                                            Time::Misc => all,
+                                            Time::Bullet => opt.bullet || all,
+                                            Time::Blitz => opt.blitz || all,
+                                            Time::Rapid => opt.rapid || all,
+                                            Time::Daily => opt.daily || all,
+                                            Time::None => {
+                                                error!(
+                                                    "Unexpected Time::None encountered for a game. Skipping game."
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        if time_allowed {
+                                            let game_info = PGNMetadata::from_game(
+                                                &msg.username,
+                                                &game,
+                                                !opt.timesort,
+                                            );
+                                            files
+                                                .entry(game_info)
+                                                .or_insert_with(|| {
+                                                    tempfile::tempfile().expect(
+                                                        "Failed to create tempfile for game.",
+                                                    )
+                                                })
+                                                .write_all(game.pgn.as_bytes())
+                                                .expect("Failed to write game PGN to tempfile.");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Error parsing a game from archive for user {}: {}",
+                                            msg.username, e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error parsing PGN archive for user {}: {}", msg.username, e);
+                        }
+                    }
+                }
+                debug!("Processed message {}/{}", i + 1, num_archives);
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                error!(
+                    "Timeout receiving PGN message after 120 seconds. This might indicate a problem with the download process."
+                );
+                return Err(Box::new(crossbeam_channel::RecvTimeoutError::Timeout));
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                info!("Channel disconnected. Received {} archives.", i);
+                return Err(Box::new(crossbeam_channel::RecvTimeoutError::Disconnected));
+            }
+        }
+    }
+
+    for (game_info, val) in files.iter_mut() {
+        let mut tmp_file = val;
+        tmp_file.seek(SeekFrom::Start(0))?;
+
+        let output_str = format!("{}", game_info);
+        output_path.set_file_name(output_str);
+        let mut dest_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&output_path)?;
+        info!(
+            "Copying temporary file to {}...",
+            output_path.as_os_str().to_str().unwrap_or("<invalid path>")
+        );
+        let num_bytes = std::io::copy(&mut tmp_file, &mut dest_file)?;
+        info!("Number of bytes copied: {}", num_bytes);
+    }
     Ok(())
 }

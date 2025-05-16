@@ -1,7 +1,8 @@
 use strum::Display;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Display)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Display, Default)]
 pub enum Time {
+    #[default]
     None,
     Misc,
     Bullet,
@@ -31,11 +32,6 @@ impl Time {
         }
     }
 }
-impl Default for Time {
-    fn default() -> Self {
-        Time::None
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct Game {
@@ -59,13 +55,15 @@ pub struct PGNMetadata {
 }
 
 impl PGNMetadata {
-    pub fn from_game(username: &String, game: &Game, ignore_time: bool) -> PGNMetadata {
+    pub fn from_game(username: &str, game: &Game, ignore_time: bool) -> PGNMetadata {
         PGNMetadata {
-            username: username.clone(),
-            color: if *username == game.white {
+            username: username.to_owned(),
+            color: if username.eq_ignore_ascii_case(&game.white) {
                 Color::White
-            } else {
+            } else if username.eq_ignore_ascii_case(&game.black) {
                 Color::Black
+            } else {
+                Color::None
             },
             time: if ignore_time { Time::None } else { game.time },
         }
