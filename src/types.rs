@@ -78,7 +78,7 @@ impl PGNMetadata {
         game: &Game,
         group_time: bool,
         group_users: bool,
-        group_color: bool,
+        group_colors: bool,
     ) -> PGNMetadata {
         PGNMetadata {
             username: if group_users {
@@ -86,7 +86,7 @@ impl PGNMetadata {
             } else {
                 Some(username.to_owned())
             },
-            color: if group_color {
+            color: if group_colors {
                 Color::None
             } else {
                 if username.eq_ignore_ascii_case(&game.white) {

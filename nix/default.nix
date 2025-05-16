@@ -1,9 +1,7 @@
 {
-  lib,
-  stdenv,
-  buildPackages,
-  rustPlatform,
   installShellFiles,
+  lib,
+  rustPlatform,
 }: let
   manifest = (lib.importTOML ../Cargo.toml).package;
 in
@@ -15,6 +13,7 @@ in
       "^Cargo.toml$"
       "^Cargo.lock$"
       "^src.*$"
+      "^build.rs$"
     ];
 
     cargoLock.lockFile = ../Cargo.lock;
@@ -28,16 +27,9 @@ in
       platforms = lib.platforms.all;
     };
 
-    postInstall = lib.optionalString (stdenv.hostPlatform.emulatorAvailable buildPackages) (
-      let
-        emulator = stdenv.hostPlatform.emulator buildPackages;
-      in ''
-        installShellCompletion --cmd chess_dl \
-          --bash <(${emulator} $out/bin/chess_dl completions bash) \
-          --fish <(${emulator} $out/bin/chess_dl completions fish) \
-          --zsh <(${emulator} $out/bin/chess_dl completions zsh) \
-          --elvish <(${emulator} $out/bin/chess_dl completions elvish) \
-          --powershell <(${emulator} $out/bin/chess_dl completions powershell)
-      ''
-    );
+    postInstall = ''
+      installShellCompletion --bash $releaseDir/build/chess_dl-*/out/chess_dl.bash
+      installShellCompletion --fish $releaseDir/build/chess_dl-*/out/chess_dl.fish
+      installShellCompletion --zsh $releaseDir/build/chess_dl-*/out/_chess_dl
+    '';
   }

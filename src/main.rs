@@ -1,6 +1,5 @@
 use bytes::Bytes;
-use clap::{CommandFactory, Parser, value_parser, Subcommand};
-use clap_complete::{Shell, generate};
+use clap::{CommandFactory, Parser};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{debug, error, info};
@@ -20,68 +19,8 @@ use types::{PGNMetadata, Time};
 mod parse;
 use parse::ChessParser;
 
-/// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
-#[derive(Parser, Clone)]
-#[command(version = "0.4.0", name = "chess_dl", author = "Nimrod Hajaj")]
-
-struct Options {
-    #[clap(subcommand)]
-    command: Option<Commands>,
-
-    #[arg()]
-    usernames: Vec<String>,
-    /// Output directory.
-    #[arg(short, default_value("."), value_parser(value_parser!(PathBuf)))]
-    output_dir: PathBuf,
-
-    #[arg(long, display_order = 3)]
-    /// Include Blitz games.
-    blitz: bool,
-
-    /// Include Bullet games.
-    #[arg(long, display_order = 2)]
-    bullet: bool,
-
-    /// Include Rapid games.
-    #[arg(long, display_order = 4)]
-    rapid: bool,
-    /// Include Daily games.
-    #[arg(long, display_order = 5)]
-    daily: bool,
-
-    /// Group games regardless of player color.
-    #[arg(short = 'c', long, display_order = 6)]
-    group_color: bool,
-
-    /// Group games regardless of username.
-    #[arg(short = 'u', long, display_order = 7)]
-    group_users: bool,
-
-    /// Separate games by time control.
-    #[arg(short = 't', long, group = "time")]
-    separate_time: bool,
-
-    /// Download raw PGN files without parsing or sorting.
-    #[arg(long, conflicts_with_all(&["blitz", "bullet", "rapid", "daily", "separate_time"]))]
-    raw: bool,
-
-    /// Maximum number of download attempts per archive.
-    #[arg(short, long, default_value("8"))]
-    attempts: u32,
-
-    /// Maximum number of concurrent archive downloads.
-    #[arg(short = 'C', long, default_value("10"))]
-    concurrent: usize,
-}
-
-#[derive(Subcommand, Clone)]
-enum Commands {
-    /// Generate shell completion scripts
-    Completions {
-        #[arg(value_enum)]
-        shell: Shell,
-    },
-}
+mod cli;
+use crate::cli::Options;
 
 struct Archive {
     username: String,
@@ -104,20 +43,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let options = Options::parse();
 
-    if let Some(command) = options.command {
-        match command {
-            Commands::Completions { shell } => {
-                let mut cmd = Options::command();
-                let name = cmd.get_name().to_string();
-                generate(shell, &mut cmd, name, &mut std::io::stdout());
-                return Ok(());
-            }
-        }
-    } else if options.usernames.is_empty() {
+    if options.usernames.is_empty() {
         // If no subcommand is provided, usernames are required
         eprintln!("Error: The following required arguments were not provided:");
         eprintln!("  <usernames>...");
-        println!("\n{}", Options::command().render_usage());
+        // Use render_long_help() instead of render_usage() for more comprehensive help
+        println!("\n{}", Options::command().render_long_help());
         std::process::exit(1);
     }
 
@@ -265,7 +196,7 @@ fn process_pgn_messages(
                     error!("Received empty PGN message for user {}", msg.username);
                     continue;
                 }
-                if opt.raw || (opt.group_color && !opt.separate_time) {
+                if opt.raw || (opt.group_colors && !opt.separate_time) {
                     files
                         .entry(PGNMetadata::from_username(&msg.username, opt.group_users))
                         .or_insert_with(|| tempfile::tempfile().unwrap())
@@ -296,7 +227,7 @@ fn process_pgn_messages(
                                                 &game,
                                                 !opt.separate_time,
                                                 opt.group_users,
-                                                opt.group_color,
+                                                opt.group_colors,
                                             );
                                             files
                                                 .entry(game_info)
