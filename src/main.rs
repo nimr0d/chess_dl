@@ -1,3 +1,4 @@
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use bytes::Bytes;
 use clap::{Parser, value_parser};
 use crossbeam_channel::unbounded;
@@ -87,7 +88,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
-    let client = Client::new();
+    let client = Client::builder()
+        .default_headers(
+            HeaderMap::from_iter(vec![(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"))])
+        )
+        .build()?;
     let mut archives = Archives::new();
 
     for username in &opt.usernames {
@@ -96,13 +101,11 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
             username
         );
         debug!("Archives URL: {}", archives_url);
-        archives.append(
-            &mut (client
-                .get(archives_url)
-                .send()
-                .await?
-                .json::<JSONArchivesContainer>()
-                .await?
+        {
+            let resp = client.get(&archives_url).send().await?;
+            debug!("Received status code: {}", resp.status());
+            let container = resp.json::<JSONArchivesContainer>().await?;
+            let mut downloaded_archives: Archives = container
                 .archives
                 .into_iter()
                 .map(|mut url| {
@@ -112,8 +115,9 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
                         url,
                     }
                 })
-                .collect::<Archives>()),
-        );
+                .collect();
+            archives.append(&mut downloaded_archives);
+        }
     }
 
     let num_archives = archives.len();
@@ -190,7 +194,10 @@ async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {
             } else {
                 "Worker thread panicked".to_string()
             };
-            Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err_msg)))
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                err_msg,
+            )))
         }
     };
 
