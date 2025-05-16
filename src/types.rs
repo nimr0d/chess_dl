@@ -13,19 +13,37 @@ pub enum Time {
 }
 impl Time {
     pub fn parse(val: &str) -> Time {
-        let seconds = match val.split('+').next() {
-            Some(s) => match s.parse::<i32>() {
-                Ok(s) => s,
-                Err(_) => return Time::Misc,
-            },
-            None => return Time::Misc,
+        // Check for Daily game format '1/seconds'
+        let daily_parts: Vec<&str> = val.split('/').collect();
+        if daily_parts.len() >= 2 && daily_parts[0] == "1" {
+            if let Ok(_) = daily_parts[1].parse::<i32>() {
+                return Time::Daily;
+            }
+        }
+        // Existing logic for time + increment
+        let parts: Vec<&str> = val.split('+').collect();
+
+        let base_time_str = parts.get(0).unwrap_or(&"");
+        let increment_str = parts.get(1).unwrap_or(&"0");
+
+        let base_time = match base_time_str.parse::<i32>() {
+            Ok(s) => s,
+            Err(_) => return Time::Misc,
         };
 
-        if seconds <= 120 {
+        let increment = match increment_str.parse::<i32>() {
+            Ok(s) => s,
+            Err(_) => return Time::Misc,
+        };
+
+        let effective_time = base_time + 40 * increment;
+
+        if effective_time <= 120 {
             Self::Bullet
-        } else if seconds <= 600 {
+        } else if effective_time <= 600 {
             Self::Blitz
-        } else if seconds <= 1500 {
+        } else if base_time <= 7200 {
+            // Using the cutoff from the file read
             Self::Rapid
         } else {
             Self::Misc
@@ -100,7 +118,7 @@ impl std::fmt::Display for PGNMetadata {
         let mut r = if let Some(u) = &self.username {
             write!(f, "{}", u)
         } else {
-            Ok(())
+            write!(f, "AllUsers")
         };
         if self.color != Color::None {
             r = r.and(write!(f, "_{}", self.color))

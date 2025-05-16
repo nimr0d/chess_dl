@@ -41,7 +41,7 @@ struct Options {
     /// Include Rapid games.
     #[arg(long, display_order = 4)]
     rapid: bool,
-    /// Currently unsupported and not detected by the parser.
+    /// Include Daily games.
     #[arg(long, display_order = 5)]
     daily: bool,
 
