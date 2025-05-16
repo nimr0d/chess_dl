@@ -1,5 +1,6 @@
 use bytes::Bytes;
-use clap::{Parser, value_parser};
+use clap::{CommandFactory, Parser, value_parser, Subcommand};
+use clap_complete::{Shell, generate};
 use crossbeam_channel::unbounded;
 use futures::stream::StreamExt;
 use log::{debug, error, info};
@@ -24,7 +25,10 @@ use parse::ChessParser;
 #[command(version = "0.4.0", name = "chess_dl", author = "Nimrod Hajaj")]
 
 struct Options {
-    #[arg(required = true)]
+    #[clap(subcommand)]
+    command: Option<Commands>,
+
+    #[arg()]
     usernames: Vec<String>,
     /// Output directory.
     #[arg(short, default_value("."), value_parser(value_parser!(PathBuf)))]
@@ -70,6 +74,15 @@ struct Options {
     concurrent: usize,
 }
 
+#[derive(Subcommand, Clone)]
+enum Commands {
+    /// Generate shell completion scripts
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
 struct Archive {
     username: String,
     url: String,
@@ -89,13 +102,32 @@ struct JSONArchivesContainer {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let mut options = Options::parse();
-    options.usernames = options
+    let options = Options::parse();
+
+    if let Some(command) = options.command {
+        match command {
+            Commands::Completions { shell } => {
+                let mut cmd = Options::command();
+                let name = cmd.get_name().to_string();
+                generate(shell, &mut cmd, name, &mut std::io::stdout());
+                return Ok(());
+            }
+        }
+    } else if options.usernames.is_empty() {
+        // If no subcommand is provided, usernames are required
+        eprintln!("Error: The following required arguments were not provided:");
+        eprintln!("  <usernames>...");
+        println!("\n{}", Options::command().render_usage());
+        std::process::exit(1);
+    }
+
+    let mut options_clone = options.clone();
+    options_clone.usernames = options_clone
         .usernames
         .into_iter()
         .map(|u| u.to_lowercase())
         .collect::<Vec<String>>();
-    download_all_games(&options).await
+    download_all_games(&options_clone).await
 }
 
 async fn download_all_games(opt: &Options) -> Result<(), Box<dyn Error>> {

@@ -29,3 +29,5 @@ peg = "0.8"
 clap = { version = "4", features = ["derive"] }
 strum = { version = "*", features = ["derive"] }
 itertools = "*"
+clap_complete = "4.5.50"
+clap_derive = "4.0"
