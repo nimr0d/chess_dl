@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 /// Chess.com bulk game downloader. By default downloads all time controls and does not sort the games into different files based on time control.
 #[derive(Parser, Clone)]
-#[command(version = "0.4.0", name = "chess_dl", author = "Nimrod Hajaj")]
+#[command(version = "0.4.1", name = "chess_dl", author = "Nimrod Hajaj")]
 pub struct Options {
     // Make struct public
     #[arg()]
