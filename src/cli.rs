@@ -45,11 +45,11 @@ pub struct Options {
     #[arg(long, conflicts_with_all(&["blitz", "bullet", "rapid", "daily", "separate_time"]))]
     pub raw: bool,
 
-    /// Maximum number of download attempts per archive.
-    #[arg(short, long, default_value("8"))]
-    pub attempts: u32,
-
     /// Maximum number of concurrent archive downloads.
     #[arg(short = 'C', long, default_value("10"))]
     pub concurrent: usize,
+
+    /// Total time limit for the program in minutes.
+    #[arg(short = 'T', long)]
+    pub time_limit: Option<u64>,
 }
