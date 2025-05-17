@@ -122,6 +122,8 @@ async fn download_all_games(opt: &Options, token: CancellationToken) -> Result<(
     let mut archives = Archives::new();
     let failed_archives: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let downloaded_count = Arc::new(AtomicUsize::new(0)); // Counter for successfully downloaded non-empty archives
+    let total_games_count = Arc::new(AtomicUsize::new(0)); // Counter for total games processed
+    let total_bytes_written = Arc::new(AtomicUsize::new(0)); // Counter for total bytes written to final files
 
     for username in &opt.usernames {
         let archives_url = format!(
@@ -155,9 +157,19 @@ async fn download_all_games(opt: &Options, token: CancellationToken) -> Result<(
 
     let (send, rec) = unbounded::<PGNMessage>();
     let opt_cp = opt.clone();
-    // The writer thread doesn't need access to failed_archives Arc directly,
+    // The writer thread doesn\'t need access to failed_archives Arc directly,
     // as it only receives PGN messages. The main thread handles reporting.
-    let write_worker = std::thread::spawn(move || process_pgn_messages(rec, opt_cp, output_path));
+    let total_games_count_clone = Arc::clone(&total_games_count);
+    let total_bytes_written_clone = Arc::clone(&total_bytes_written);
+    let write_worker = std::thread::spawn(move || {
+        process_pgn_messages(
+            rec,
+            opt_cp,
+            output_path,
+            total_games_count_clone,
+            total_bytes_written_clone,
+        )
+    });
     let downloaded_count_clone = Arc::clone(&downloaded_count); // Clone for use in the async block
     let fetches = futures::stream::iter(archives.into_iter().map(|archive| {
         let client = &client;
@@ -180,7 +192,7 @@ async fn download_all_games(opt: &Options, token: CancellationToken) -> Result<(
                             match resp.bytes().await {
                                 Ok(bytes) => {
                                     if !bytes.is_empty() {
-                                        info!(
+                                        debug!(
                                             "Downloaded {} bytes from {}",
                                             bytes.len(),
                                             archive.url
@@ -308,13 +320,21 @@ async fn download_all_games(opt: &Options, token: CancellationToken) -> Result<(
     info!("Empty archives received: {}", num_empty); // Report empty archives
     info!("Failed to download: {}", num_failed);
 
-    Ok(())
+    let total_games = total_games_count.load(Ordering::SeqCst);
+    let total_mb_written = total_bytes_written.load(Ordering::SeqCst) as f64 / 1024.0 / 1024.0;
+
+    info!("Total games processed: {}", total_games);
+    info!("Total bytes written to files: {:.2} MB", total_mb_written);
+
+Ok(())
 }
 
 fn process_pgn_messages(
     rec: crossbeam_channel::Receiver<PGNMessage>,
-    opt: Options,             // Takes ownership of Options
-    mut output_path: PathBuf, // Takes ownership of output_path
+    opt: Options,                          // Takes ownership of Options
+    mut output_path: PathBuf,              // Takes ownership of output_path
+    total_games_count: Arc<AtomicUsize>,   // Shared counter for total games
+    total_bytes_written: Arc<AtomicUsize>, // Shared counter for total bytes written
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut files = HashMap::<PGNMetadata, File>::new();
     let mut received_count = 0; // Track how many messages were received
@@ -364,8 +384,9 @@ fn process_pgn_messages(
                                             tempfile::tempfile()
                                                 .expect("Failed to create tempfile for game.")
                                         })
-                                        .write_all(game.pgn.as_bytes())
+                                        .write_all(game.pgn.as_bytes()) // Writing game PGN bytes
                                         .expect("Failed to write game PGN to tempfile.");
+                                    total_games_count.fetch_add(1, Ordering::SeqCst); // Increment total games count
                                 }
                             }
                             Err(e) => {
@@ -409,6 +430,7 @@ fn process_pgn_messages(
         );
         let num_bytes = std::io::copy(&mut tmp_file, &mut dest_file)?;
         info!("Number of bytes copied: {}", num_bytes);
+        total_bytes_written.fetch_add(num_bytes as usize, Ordering::SeqCst); // Increment total bytes written
     }
     Ok(())
 }
