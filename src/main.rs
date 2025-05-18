@@ -15,6 +15,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::signal::ctrl_c;
 use tokio::time::{Duration as TokioDuration, sleep}; // Use different name to avoid conflict with std::time::Duration
 use tokio_util::sync::CancellationToken;
@@ -48,6 +49,7 @@ struct JSONArchivesContainer {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let start_time = Instant::now();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let options = Options::parse();
 
@@ -67,6 +69,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|u| u.to_lowercase())
         .collect::<Vec<String>>();
 
+    let all_time_controls = !(options_clone.blitz
+        || options_clone.bullet
+        || options_clone.rapid
+        || options_clone.daily);
+    let effectively_raw =
+        all_time_controls && options_clone.group_colors && !options_clone.separate_time;
+    if effectively_raw && !options_clone.raw {
+        info!("Parsing not necessary with these options. Raw PGN files will be downloaded.");
+        options_clone.raw = true;
+    }
     let token = CancellationToken::new();
 
     // Spawn a task to listen for Ctrl+C and cancel the token
@@ -92,7 +104,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Pass the token to the main download function
-    download_all_games(&options_clone, token).await
+    download_all_games(&options_clone, token).await?;
+
+    let elapsed_time = start_time.elapsed();
+    info!("Total runtime: {:?}", elapsed_time);
+
+    Ok(())
 }
 
 pin_project! {
@@ -323,10 +340,14 @@ async fn download_all_games(opt: &Options, token: CancellationToken) -> Result<(
     let total_games = total_games_count.load(Ordering::SeqCst);
     let total_mb_written = total_bytes_written.load(Ordering::SeqCst) as f64 / 1024.0 / 1024.0;
 
-    info!("Total games processed: {}", total_games);
+    if opt.raw {
+        info!("0 games processed because PGN files were downloaded raw.")
+    } else {
+        info!("Total games processed: {}", total_games);
+    }
     info!("Total bytes written to files: {:.2} MB", total_mb_written);
 
-Ok(())
+    Ok(())
 }
 
 fn process_pgn_messages(
@@ -344,8 +365,7 @@ fn process_pgn_messages(
         received_count += 1;
         // We no longer signal failure with empty bytes, so this check is removed.
         // If a download truly fails after retries, it won't be sent on the channel.
-
-        if opt.raw || (opt.group_colors && !opt.separate_time) {
+        if opt.raw {
             files
                 .entry(PGNMetadata::from_username(&msg.username, opt.group_users))
                 .or_insert_with(|| tempfile::tempfile().unwrap())
@@ -356,13 +376,13 @@ fn process_pgn_messages(
                     for game_result in parser {
                         match game_result {
                             Ok(game) => {
-                                let all = !(opt.bullet | opt.blitz | opt.rapid | opt.daily);
+                                let all_tc = !(opt.bullet | opt.blitz | opt.rapid | opt.daily);
                                 let time_allowed = match game.time {
-                                    Time::Misc => all,
-                                    Time::Bullet => opt.bullet || all,
-                                    Time::Blitz => opt.blitz || all,
-                                    Time::Rapid => opt.rapid || all,
-                                    Time::Daily => opt.daily || all,
+                                    Time::Misc => all_tc,
+                                    Time::Bullet => opt.bullet || all_tc,
+                                    Time::Blitz => opt.blitz || all_tc,
+                                    Time::Rapid => opt.rapid || all_tc,
+                                    Time::Daily => opt.daily || all_tc,
                                     Time::None => {
                                         error!(
                                             "Unexpected Time::None encountered for a game. Skipping game."
@@ -378,13 +398,13 @@ fn process_pgn_messages(
                                         opt.group_users,
                                         opt.group_colors,
                                     );
-                                    files
+                                    files // Get the file handle
                                         .entry(game_info)
                                         .or_insert_with(|| {
                                             tempfile::tempfile()
                                                 .expect("Failed to create tempfile for game.")
                                         })
-                                        .write_all(game.pgn.as_bytes()) // Writing game PGN bytes
+                                        .write_all(game.pgn.as_bytes()) // Write to the file
                                         .expect("Failed to write game PGN to tempfile.");
                                     total_games_count.fetch_add(1, Ordering::SeqCst); // Increment total games count
                                 }
@@ -403,7 +423,7 @@ fn process_pgn_messages(
                 }
             }
         }
-        // debug!("Processed message {}/{}", received_count, num_archives); // Optional: Can't reliably track total archives received this way anymore
+        // debug!("Processed message {}/{}\", received_count, num_archives); // Optional: Can\'t reliably track total archives received this way anymore
     }
 
     info!(
